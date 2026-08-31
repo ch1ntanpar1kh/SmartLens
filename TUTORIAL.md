@@ -25,7 +25,7 @@ By offloading runtime delivery to **Google Play Services (GMS Core)**, your app 
   │  ├── Shared ML Kit Object Detection Engine & Models    │
   │  ├── Shared LiteRT C++ Interpreter Engine              │
   │  └── Dynamic GPU Acceleration Drivers (Vulkan/OpenCL)  │
-  └────────────────────────────────────────────────────────┘
+  └──────────────────────────?─────────────────────────────┘
 ```
 
 ### Key Deployment Benefits
@@ -173,8 +173,7 @@ YOLOv8 requires input normalized to Float32 values between `[0.0, 1.0]`. We insp
 
 ```kotlin
 private fun convertBitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
-    // 4 bytes per Float32 value
-    val byteBuffer = ByteBuffer.allocateDirect(4 * 1 * imageSize * imageSize * 3)
+    val byteBuffer = ByteBuffer.allocateDirect(4 * imageSize * imageSize * 3)
     byteBuffer.order(ByteOrder.nativeOrder())
 
     val intValues = IntArray(imageSize * imageSize)
@@ -215,7 +214,6 @@ GPU drivers (Qualcomm Adreno OpenCL/Vulkan) **require the LiteRT GPU delegate to
 ```kotlin
 class SmartLensViewModel(application: Application) : AndroidViewModel(application) {
 
-    // Single-threaded executor guarantees all LiteRT operations run on 1 thread
     private val mlExecutor = Executors.newSingleThreadExecutor()
     private val mlDispatcher = mlExecutor.asCoroutineDispatcher()
     private val mlMutex = Mutex()
@@ -223,15 +221,12 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
     private fun initializeModels() {
         viewModelScope.launch(mlDispatcher) {
             mlMutex.withLock {
-                // Initialize GMS LiteRT engine in background
                 val isGpuAvailable = TfLiteGpu.isGpuDelegateAvailable(getApplication()).await()
                 val initOptions = TfLiteInitializationOptions.builder()
                     .setEnableGpuDelegateSupport(isGpuAvailable)
                     .build()
 
                 TfLite.initialize(getApplication(), initOptions).await()
-                
-                // Initialize classifier on CPU first for fast launch
                 imageClassifierHelper = ImageClassifierHelper(getApplication())
                 _isInitialized.value = true
             }
@@ -241,7 +236,6 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggleGpu() {
         viewModelScope.launch(mlDispatcher) {
             mlMutex.withLock {
-                // Safely switch delegate without race conditions
                 imageClassifierHelper?.toggleGpu(!_isGpuEnabled.value)
                 _isGpuEnabled.value = !_isGpuEnabled.value
             }
@@ -283,14 +277,12 @@ fun classify(bitmap: Bitmap): ClassificationResult {
     val letterboxedBitmap = letterboxBitmap(bitmap, imageSize)
     val inputBuffer = convertBitmapToByteBuffer(letterboxedBitmap)
     
-    // Output shape: [1, 84, 8400]
     val outputArray = Array(1) { Array(84) { FloatArray(8400) } }
 
     val startTime = System.nanoTime()
     interpreter?.run(inputBuffer, outputArray)
     val endTime = System.nanoTime()
 
-    // Track maximum confidence score per class across all 8,400 anchor predictions
     val classScores = FloatArray(labels.size)
     val output = outputArray[0]
 
@@ -303,7 +295,6 @@ fun classify(bitmap: Bitmap): ClassificationResult {
         }
     }
 
-    // Sort predictions by confidence
     val topResults = classScores.mapIndexed { index, confidence ->
         Pair(labels.getOrElse(index) { "Unknown" }, confidence)
     }
@@ -314,42 +305,24 @@ fun classify(bitmap: Bitmap): ClassificationResult {
 }
 ```
 
-### CameraX `FILL_CENTER` Bounding Box Overlay Alignment
-CameraX `PreviewView.ScaleType.FILL_CENTER` crops camera frames to fill the screen aspect ratio. We calculate uniform scale and center offset so rendered bounding boxes align **pixel-for-pixel**:
+---
 
-```kotlin
-Canvas(modifier = modifier.fillMaxSize()) {
-    // CameraX FILL_CENTER scaling math
-    val scale = Math.max(size.width / imageWidth.toFloat(), size.height / imageHeight.toFloat())
-    val offsetX = (size.width - imageWidth * scale) / 2f
-    val offsetY = (size.height - imageHeight * scale) / 2f
+## 🧹 Step 5: Code Optimization, Modular Composables & Asset Minimization
 
-    for (result in results) {
-        val left = result.boundingBox.left * scale + offsetX
-        val top = result.boundingBox.top * scale + offsetY
-        val right = result.boundingBox.right * scale + offsetX
-        val bottom = result.boundingBox.bottom * scale + offsetY
+To maintain a clean codebase and minimize APK size:
 
-        // Draw bounding box & text label
-        drawRoundRect(
-            color = if (result.confidence > 0.7f) Color.Green else Color.Yellow,
-            topLeft = Offset(left, top),
-            size = Size(right - left, bottom - top),
-            style = Stroke(width = 3.dp.toPx())
-        )
-    }
-}
-```
+1. **Asset Minimization (-5.2 MB)**: Clean out legacy unused models and label files from `app/src/main/assets/`, leaving only `yolov8n.tflite` (12.2 MB) and `coco_labels.txt`.
+2. **Modular Composables**: In `MainActivity.kt`, break large inline screens into reusable private composables (`TuningSettingsPanel`, `PermissionRequestContent`).
+3. **Helper Method Extraction**: In `SmartLensViewModel.kt`, extract crop & classification logic into `cropAndClassify()` and frame inference into `processFrameInference()`.
+4. **Expression Bodies**: Use Kotlin single-expression functions (`runCatching`) in helper classes like `ObjectDetectorHelper.kt`.
 
 ---
 
 ## 🏁 Summary Checklist
-
-When building your ML Kit + LiteRT app:
 
 - [x] Use `com.google.mlkit:object-detection` and `play-services-tflite-java` for GMS delivery (keep APK size ~5 MB).
 - [x] Select a practical model trained on COCO 80 items (YOLOv8) over 1,000-class academic ImageNet models.
 - [x] Add **12% padding margin** around bounding box crops.
 - [x] Apply **aspect-ratio letterboxing** with neutral gray fill before resizing to 640×640.
 - [x] Enforce a **single-threaded executor + Mutex** for all LiteRT interpreter & GPU delegate operations.
-- [x] Correctly handle portrait mode rotation dimension swaps (`imageWidth` / `imageHeight`) and `FILL_CENTER` overlay matrix scaling.
+- [x] Clean up asset directory (-5.2 MB) and modularize UI into reusable composables.

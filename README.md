@@ -2,7 +2,7 @@
 
 Real-time Android object detection and classification app powered by **YOLOv8-nano**, **ML Kit**, **LiteRT (TensorFlow Lite)** via **Google Play Services (GMS)**, **CameraX**, and **Jetpack Compose**.
 
-> 📚 **Beginner Step-by-Step Guide**: Read the comprehensive [**TUTORIAL.md**](TUTORIAL.md) for full architecture details, GMS Core deployment benefits, pre-processing math, YOLOv8 output matrix parsing, and GPU thread-safety patterns.
+> 📚 **Beginner Step-by-Step Guide**: Read the comprehensive [**TUTORIAL.md**](TUTORIAL.md) for full architecture details, GMS Core deployment benefits, pre-processing math, YOLOv8 output matrix parsing, asset optimization, and GPU thread-safety patterns.
 
 ## Features
 
@@ -19,6 +19,9 @@ Real-time Android object detection and classification app powered by **YOLOv8-na
 - ⚡ **Thread-Safe GPU Acceleration**:
   - Dynamic runtime toggle between CPU (multithreaded) and GPU (`GpuDelegateFactory`) via Google Play Services.
   - Dedicated single-threaded executor + Mutex synchronization guarantees GPU context stability on mobile SoCs (e.g. Qualcomm Snapdragon Adreno GPU).
+- 🧹 **Clean & Optimized Architecture (-5.2 MB Asset Reduction)**:
+  - Removed legacy unused models, leaving only `yolov8n.tflite` (12.2 MB) and `coco_labels.txt`.
+  - Refactored Kotlin codebase with modular composables (`TuningSettingsPanel`, `PermissionRequestContent`) and extracted frame processing helpers (`cropAndClassify()`).
 - 📦 **Minimal APK Footprint**: ML Kit and LiteRT runtimes are delivered dynamically via Google Play Services, avoiding heavy bundled native binaries.
 
 ## 📦 Why Deployment via Google Play Services (GMS) Matters
