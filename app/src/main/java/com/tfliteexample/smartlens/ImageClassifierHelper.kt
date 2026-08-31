@@ -25,7 +25,7 @@ class ImageClassifierHelper(private val context: Context) {
     private val labels = mutableListOf<String>()
 
     private val imageSize = 224
-    private val numClasses = 1001
+    private var numClasses = 1001
 
     init {
         loadLabels()
@@ -44,7 +44,8 @@ class ImageClassifierHelper(private val context: Context) {
     }
 
     private fun loadModelFile(): MappedByteBuffer {
-        val fileDescriptor = context.assets.openFd("mobilenet_v2_1.0_224_quant.tflite")
+        // Upgrade to EfficientNet-Lite0 int8 quantized model (5.2 MB) for significantly higher accuracy
+        val fileDescriptor = context.assets.openFd("efficientnet_lite0_int8.tflite")
         val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
         val fileChannel = inputStream.channel
         return fileChannel.map(
@@ -67,7 +68,19 @@ class ImageClassifierHelper(private val context: Context) {
         }
 
         val model = loadModelFile()
-        interpreter = InterpreterApi.create(model, options)
+        val newInterpreter = InterpreterApi.create(model, options)
+
+        // Dynamically inspect model output tensor shape
+        try {
+            val outputShape = newInterpreter.getOutputTensor(0).shape()
+            if (outputShape.size >= 2) {
+                numClasses = outputShape[1]
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        interpreter = newInterpreter
     }
 
     fun toggleGpu(useGpu: Boolean) {
@@ -75,13 +88,12 @@ class ImageClassifierHelper(private val context: Context) {
     }
 
     fun classify(bitmap: Bitmap): ClassificationResult {
-        // Fix #1: Preserves aspect ratio using letterboxing with a neutral gray background
-        // instead of squishing non-square objects into 224x224
+        // Preserves aspect ratio using letterboxing with a neutral gray background
         val letterboxedBitmap = letterboxBitmap(bitmap, imageSize)
         val inputBuffer = convertBitmapToByteBuffer(letterboxedBitmap)
         letterboxedBitmap.recycle()
 
-        // Output format for uint8 quantized model
+        // Output format for int8 quantized model
         val outputArray = Array(1) { ByteArray(numClasses) }
 
         val startTime = System.nanoTime()
