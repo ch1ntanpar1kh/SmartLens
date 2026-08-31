@@ -52,6 +52,19 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
     private val _imageHeight = MutableStateFlow(1)
     val imageHeight: StateFlow<Int> = _imageHeight.asStateFlow()
 
+    // ── Tunable Settings State ──────────────────────────────────────────
+    private val _minConfidenceThreshold = MutableStateFlow(0.40f)
+    val minConfidenceThreshold: StateFlow<Float> = _minConfidenceThreshold.asStateFlow()
+
+    private val _paddingMarginPercent = MutableStateFlow(0.12f)
+    val paddingMarginPercent: StateFlow<Float> = _paddingMarginPercent.asStateFlow()
+
+    private val _isSingleImageMode = MutableStateFlow(false)
+    val isSingleImageMode: StateFlow<Boolean> = _isSingleImageMode.asStateFlow()
+
+    private val _maxDetections = MutableStateFlow(3)
+    val maxDetections: StateFlow<Int> = _maxDetections.asStateFlow()
+
     private var objectDetectorHelper: ObjectDetectorHelper? = null
     private var imageClassifierHelper: ImageClassifierHelper? = null
 
@@ -96,6 +109,27 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun setMinConfidenceThreshold(value: Float) {
+        _minConfidenceThreshold.value = value
+    }
+
+    fun setPaddingMarginPercent(value: Float) {
+        _paddingMarginPercent.value = value
+    }
+
+    fun setSingleImageMode(value: Boolean) {
+        _isSingleImageMode.value = value
+        viewModelScope.launch(mlDispatcher) {
+            mlMutex.withLock {
+                objectDetectorHelper?.setMode(value)
+            }
+        }
+    }
+
+    fun setMaxDetections(value: Int) {
+        _maxDetections.value = value
+    }
+
     fun toggleGpu() {
         if (!_isInitialized.value) return
 
@@ -121,25 +155,37 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         isProcessing = true
-        _imageWidth.value = imageProxy.width
-        _imageHeight.value = imageProxy.height
+
+        // Correctly swap width and height in portrait mode (90° or 270°) so bounding box scaling matches rotation
+        val isRotated = imageRotation == 90 || imageRotation == 270
+        val effectiveWidth = if (isRotated) imageProxy.height else imageProxy.width
+        val effectiveHeight = if (isRotated) imageProxy.width else imageProxy.height
+
+        _imageWidth.value = effectiveWidth
+        _imageHeight.value = effectiveHeight
 
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
             val inputImage = InputImage.fromMediaImage(mediaImage, imageRotation)
             val bitmap = imageProxy.toBitmap()
 
+            val currentMinConf = _minConfidenceThreshold.value
+            val currentMargin = _paddingMarginPercent.value
+            val currentMaxCount = _maxDetections.value
+
             viewModelScope.launch(mlDispatcher) {
                 try {
                     mlMutex.withLock {
                         val rawObjects = objectDetectorHelper?.detect(inputImage) ?: emptyList()
 
-                        // Fix #5: Filter out spurious or tiny detections (< 40x40 px)
+                        // Filter out small or ghost detections (< 40x40 px)
                         val minArea = 40 * 40
-                        val detectedObjects = rawObjects.filter { obj ->
-                            val rect = obj.boundingBox
-                            rect.width() * rect.height() >= minArea
-                        }
+                        val detectedObjects = rawObjects
+                            .filter { obj ->
+                                val rect = obj.boundingBox
+                                rect.width() * rect.height() >= minArea
+                            }
+                            .take(currentMaxCount)
 
                         val results = mutableListOf<DetectionResult>()
                         var totalInferenceTime = 0L
@@ -149,9 +195,9 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
                             val mlKitLabel = detectedObject.labels.firstOrNull()?.text ?: "Unknown"
 
                             if (bitmap != null) {
-                                // Fix #2: Add 12% padding around the bounding box to capture full object context
-                                val padX = (rawBox.width() * 0.12f).toInt()
-                                val padY = (rawBox.height() * 0.12f).toInt()
+                                // Dynamic box margin padding (0% to 30%) around detected object
+                                val padX = (rawBox.width() * currentMargin).toInt()
+                                val padY = (rawBox.height() * currentMargin).toInt()
 
                                 val safeRect = Rect(
                                     Math.max(0, rawBox.left - padX),
@@ -175,7 +221,8 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
                                     if (classificationResult != null) {
                                         totalInferenceTime += classificationResult.inferenceTimeMs
                                         val topResult = classificationResult.topResults.firstOrNull()
-                                        if (topResult != null) {
+                                        // Filter results by user's minimum confidence threshold
+                                        if (topResult != null && topResult.second >= currentMinConf) {
                                             results.add(
                                                 DetectionResult(
                                                     boundingBox = RectF(safeRect),

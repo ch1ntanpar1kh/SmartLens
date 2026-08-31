@@ -12,8 +12,14 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,6 +63,14 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
     val imageWidth by viewModel.imageWidth.collectAsState()
     val imageHeight by viewModel.imageHeight.collectAsState()
 
+    // Fine-tuning settings state
+    val minConfidenceThreshold by viewModel.minConfidenceThreshold.collectAsState()
+    val paddingMarginPercent by viewModel.paddingMarginPercent.collectAsState()
+    val isSingleImageMode by viewModel.isSingleImageMode.collectAsState()
+    val maxDetections by viewModel.maxDetections.collectAsState()
+
+    var showSettingsPanel by remember { mutableStateOf(false) }
+
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -96,7 +110,6 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
     val executor = remember { Executors.newSingleThreadExecutor() }
     val previewView = remember { PreviewView(context) }
 
-    // Set up camera only once when initialized, using LaunchedEffect to avoid rebinding
     LaunchedEffect(isInitialized) {
         if (!isInitialized) return@LaunchedEffect
 
@@ -130,7 +143,7 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Camera preview
+        // Camera preview with FILL_CENTER scale type
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = {
@@ -140,7 +153,7 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
             }
         )
 
-        // Detection overlay
+        // Bounding Box Overlay
         if (imageWidth > 0 && imageHeight > 0) {
             DetectionOverlay(
                 results = detectionResults,
@@ -150,14 +163,118 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
             )
         }
 
-        // Bottom info bar
+        // Top Action Bar: Settings Toggle Button
+        IconButton(
+            onClick = { showSettingsPanel = !showSettingsPanel },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(50))
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Accuracy Settings",
+                tint = if (showSettingsPanel) MaterialTheme.colorScheme.primary else Color.White
+            )
+        }
+
+        // Bottom Info Bar + Expandable Fine-Tuning Panel
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.7f))
+                .background(Color.Black.copy(alpha = 0.8f))
                 .padding(16.dp)
         ) {
+            // Expandable Accuracy Tuning Settings Panel
+            AnimatedVisibility(
+                visible = showSettingsPanel,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        "⚙️ Accuracy & Detection Tuning",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Min Confidence Threshold Slider
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Min Confidence Threshold:", color = Color.White, fontSize = 12.sp)
+                        Text("${(minConfidenceThreshold * 100).toInt()}%", color = Color.Green, fontSize = 12.sp)
+                    }
+                    Slider(
+                        value = minConfidenceThreshold,
+                        onValueChange = { viewModel.setMinConfidenceThreshold(it) },
+                        valueRange = 0.10f..0.90f
+                    )
+
+                    // Bounding Box Padding Margin Slider
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Box Padding Margin:", color = Color.White, fontSize = 12.sp)
+                        Text("${(paddingMarginPercent * 100).toInt()}%", color = Color.Yellow, fontSize = 12.sp)
+                    }
+                    Slider(
+                        value = paddingMarginPercent,
+                        onValueChange = { viewModel.setPaddingMarginPercent(it) },
+                        valueRange = 0.00f..0.30f
+                    )
+
+                    // Single Image High-Res Detector Mode Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("High-Res Single Image Mode", color = Color.White, fontSize = 12.sp)
+                            Text(
+                                if (isSingleImageMode) "Higher resolution detector per frame" else "Fast stream tracking mode",
+                                color = Color.Gray,
+                                fontSize = 10.sp
+                            )
+                        }
+                        Switch(
+                            checked = isSingleImageMode,
+                            onCheckedChange = { viewModel.setSingleImageMode(it) }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Max Objects Count Slider
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Max Objects Detected:", color = Color.White, fontSize = 12.sp)
+                        Text("$maxDetections", color = Color.Cyan, fontSize = 12.sp)
+                    }
+                    Slider(
+                        value = maxDetections.toFloat(),
+                        onValueChange = { viewModel.setMaxDetections(it.toInt()) },
+                        valueRange = 1f..5f,
+                        steps = 3
+                    )
+                }
+            }
+
             if (!isInitialized) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -186,6 +303,7 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
                 )
             }
 
+            // Main Status Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -208,7 +326,7 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
                 )
             }
 
-            // Object count
+            // Object count status
             if (detectionResults.isNotEmpty()) {
                 Text(
                     text = "${detectionResults.size} object(s) detected",

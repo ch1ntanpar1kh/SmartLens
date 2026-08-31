@@ -21,24 +21,27 @@ fun DetectionOverlay(
     imageHeight: Int,
     modifier: Modifier = Modifier
 ) {
-    if (results.isEmpty()) return
+    if (results.isEmpty() || imageWidth <= 0 || imageHeight <= 0) return
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val canvasWidth = size.width
         val canvasHeight = size.height
 
-        val scaleX = canvasWidth / imageWidth.toFloat()
-        val scaleY = canvasHeight / imageHeight.toFloat()
+        // CameraX PreviewView uses ScaleType.FILL_CENTER (center crop to fill screen).
+        // Uniform scale and offset alignment ensures bounding boxes match the rendered camera feed pixel-for-pixel.
+        val scale = Math.max(canvasWidth / imageWidth.toFloat(), canvasHeight / imageHeight.toFloat())
+        val offsetX = (canvasWidth - imageWidth * scale) / 2f
+        val offsetY = (canvasHeight - imageHeight * scale) / 2f
 
         for (result in results) {
-            val left = result.boundingBox.left * scaleX
-            val top = result.boundingBox.top * scaleY
-            val right = result.boundingBox.right * scaleX
-            val bottom = result.boundingBox.bottom * scaleY
+            val left = result.boundingBox.left * scale + offsetX
+            val top = result.boundingBox.top * scale + offsetY
+            val right = result.boundingBox.right * scale + offsetX
+            val bottom = result.boundingBox.bottom * scale + offsetY
 
             val confidenceColor = when {
-                result.confidence > 0.8f -> Color.Green
-                result.confidence > 0.5f -> Color.Yellow
+                result.confidence > 0.7f -> Color.Green
+                result.confidence > 0.4f -> Color.Yellow
                 else -> Color.Red
             }
 
@@ -61,16 +64,18 @@ fun DetectionOverlay(
             val textWidth = textPaint.measureText(text)
             val textHeight = textPaint.descent() - textPaint.ascent()
 
+            val textBackgroundTop = Math.max(0f, top - textHeight - 12f)
+
             drawRect(
                 color = confidenceColor,
-                topLeft = Offset(left, top - textHeight - 12f),
+                topLeft = Offset(left, textBackgroundTop),
                 size = Size(textWidth + 16f, textHeight + 12f)
             )
 
             drawContext.canvas.nativeCanvas.drawText(
                 text,
                 left + 8f,
-                top - 8f,
+                textBackgroundTop + textHeight,
                 textPaint
             )
         }
