@@ -1,14 +1,23 @@
 # Smart Lens 🔍
 
-Real-time Android object detection and fine-grained classification app built with **ML Kit**, **LiteRT (TensorFlow Lite)** via **Google Play Services (GMS)**, **CameraX**, and **Jetpack Compose**.
+Real-time Android object detection and classification app powered by **YOLOv8-nano**, **ML Kit**, **LiteRT (TensorFlow Lite)** via **Google Play Services (GMS)**, **CameraX**, and **Jetpack Compose**.
 
 ## Features
 
-- 👁️ **Real-Time Object Detection**: Uses ML Kit Object Detection delivered via Google Play Services to identify and bound objects in a live camera stream.
-- 🏷️ **Fine-Grained Classification**: Uses quantized MobileNet V2 `.tflite` model running via LiteRT `InterpreterApi` for 1,000 ImageNet categories.
-- ⚡ **GPU Acceleration**: Dynamic runtime toggle between CPU (multithreaded) and GPU (`GpuDelegateFactory`) via Google Play Services.
-- 📦 **Minimal APK Footprint**: Both ML Kit and LiteRT runtimes are delivered dynamically via Google Play Services, avoiding heavy bundled binaries.
-- 🎨 **Modern Jetpack Compose UI**: CameraX preview with custom Canvas overlay for real-time bounding boxes and confidence scores.
+- 🎯 **YOLOv8-nano LiteRT Classification**: Converted via **LiteRT-Torch 0.9.1** to classify 80 everyday COCO objects (*cell phone, laptop, coffee mug, chair, bottle, backpack, etc.*) instead of legacy academic ImageNet classes.
+- 👁️ **Real-Time Object Detection**: Uses ML Kit Object Detection delivered via Google Play Services to locate bounding boxes in the live camera feed.
+- ⚙️ **In-App Accuracy Tuning Panel**: Interactive settings drawer (⚙️ icon) to adjust:
+  - **Min Confidence Threshold** (10% to 90%)
+  - **Box Padding Margin** (0% to 30% padding)
+  - **Detector Mode** (Fast `STREAM_MODE` vs High-Res `SINGLE_IMAGE_MODE`)
+  - **Max Objects Count** (1 to 5 objects)
+- 📐 **Pixel-Perfect Alignment & Letterboxing**:
+  - Aspect-ratio letterboxing prevents object distortion.
+  - Uniform CameraX `FILL_CENTER` scaling & rotation math ensures bounding boxes align accurately in portrait mode.
+- ⚡ **Thread-Safe GPU Acceleration**:
+  - Dynamic runtime toggle between CPU (multithreaded) and GPU (`GpuDelegateFactory`) via Google Play Services.
+  - Dedicated single-threaded executor + Mutex synchronization guarantees GPU context stability on mobile SoCs (e.g. Qualcomm Snapdragon Adreno GPU).
+- 📦 **Minimal APK Footprint**: ML Kit and LiteRT runtimes are delivered dynamically via Google Play Services, avoiding heavy bundled native binaries.
 
 ## 📦 Why Deployment via Google Play Services (GMS) Matters
 
@@ -34,6 +43,7 @@ Instead of bundling heavy C++ native libraries (`libtensorflowlite_jni.so`) insi
 - **Object Detection**: `com.google.mlkit:object-detection`
 - **LiteRT Engine**: `com.google.android.gms:play-services-tflite-java`
 - **LiteRT GPU Delegate**: `com.google.android.gms:play-services-tflite-gpu`
+- **Classifier Model**: `yolov8n.tflite` (12.2 MB, LiteRT-Torch 0.9.1)
 - **Language**: Kotlin 2.0 + Coroutines + StateFlow
 
 ## Setup & Running
