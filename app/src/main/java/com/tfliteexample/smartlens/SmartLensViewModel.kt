@@ -12,6 +12,7 @@ import com.google.android.gms.tflite.client.TfLiteInitializationOptions
 import com.google.android.gms.tflite.gpu.support.TfLiteGpu
 import com.google.android.gms.tflite.java.TfLite
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.objects.DetectedObject
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,7 +86,6 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch(mlDispatcher) {
             mlMutex.withLock {
                 try {
-                    // Check GPU delegate availability and request GPU support initialization in GMS
                     val gpuAvailableTask = TfLiteGpu.isGpuDelegateAvailable(getApplication())
                     val isGpuAvailable = gpuAvailableTask.await()
 
@@ -97,8 +97,6 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
                     TfLite.initialize(getApplication(), initOptionsBuilder.build()).await()
 
                     objectDetectorHelper = ObjectDetectorHelper()
-
-                    // Launch with CPU engine by default for fast & reliable app startup
                     imageClassifierHelper = ImageClassifierHelper(getApplication())
 
                     _isInitialized.value = true
@@ -109,13 +107,8 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun setMinConfidenceThreshold(value: Float) {
-        _minConfidenceThreshold.value = value
-    }
-
-    fun setPaddingMarginPercent(value: Float) {
-        _paddingMarginPercent.value = value
-    }
+    fun setMinConfidenceThreshold(value: Float) { _minConfidenceThreshold.value = value }
+    fun setPaddingMarginPercent(value: Float) { _paddingMarginPercent.value = value }
 
     fun setSingleImageMode(value: Boolean) {
         _isSingleImageMode.value = value
@@ -126,9 +119,7 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun setMaxDetections(value: Int) {
-        _maxDetections.value = value
-    }
+    fun setMaxDetections(value: Int) { _maxDetections.value = value }
 
     fun toggleGpu() {
         if (!_isInitialized.value) return
@@ -156,89 +147,19 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
 
         isProcessing = true
 
-        // Correctly swap width and height in portrait mode (90° or 270°) so bounding box scaling matches rotation
         val isRotated = imageRotation == 90 || imageRotation == 270
-        val effectiveWidth = if (isRotated) imageProxy.height else imageProxy.width
-        val effectiveHeight = if (isRotated) imageProxy.width else imageProxy.height
-
-        _imageWidth.value = effectiveWidth
-        _imageHeight.value = effectiveHeight
+        _imageWidth.value = if (isRotated) imageProxy.height else imageProxy.width
+        _imageHeight.value = if (isRotated) imageProxy.width else imageProxy.height
 
         val mediaImage = imageProxy.image
         if (mediaImage != null) {
             val inputImage = InputImage.fromMediaImage(mediaImage, imageRotation)
             val bitmap = imageProxy.toBitmap()
 
-            val currentMinConf = _minConfidenceThreshold.value
-            val currentMargin = _paddingMarginPercent.value
-            val currentMaxCount = _maxDetections.value
-
             viewModelScope.launch(mlDispatcher) {
                 try {
                     mlMutex.withLock {
-                        val rawObjects = objectDetectorHelper?.detect(inputImage) ?: emptyList()
-
-                        // Filter out small or ghost detections (< 40x40 px)
-                        val minArea = 40 * 40
-                        val detectedObjects = rawObjects
-                            .filter { obj ->
-                                val rect = obj.boundingBox
-                                rect.width() * rect.height() >= minArea
-                            }
-                            .take(currentMaxCount)
-
-                        val results = mutableListOf<DetectionResult>()
-                        var totalInferenceTime = 0L
-
-                        for (detectedObject in detectedObjects) {
-                            val rawBox = detectedObject.boundingBox
-                            val mlKitLabel = detectedObject.labels.firstOrNull()?.text ?: "Unknown"
-
-                            if (bitmap != null) {
-                                // Dynamic box margin padding (0% to 30%) around detected object
-                                val padX = (rawBox.width() * currentMargin).toInt()
-                                val padY = (rawBox.height() * currentMargin).toInt()
-
-                                val safeRect = Rect(
-                                    Math.max(0, rawBox.left - padX),
-                                    Math.max(0, rawBox.top - padY),
-                                    Math.min(bitmap.width, rawBox.right + padX),
-                                    Math.min(bitmap.height, rawBox.bottom + padY)
-                                )
-
-                                if (safeRect.width() > 0 && safeRect.height() > 0) {
-                                    val croppedBitmap = Bitmap.createBitmap(
-                                        bitmap,
-                                        safeRect.left,
-                                        safeRect.top,
-                                        safeRect.width(),
-                                        safeRect.height()
-                                    )
-
-                                    val classificationResult = imageClassifierHelper?.classify(croppedBitmap)
-                                    croppedBitmap.recycle()
-
-                                    if (classificationResult != null) {
-                                        totalInferenceTime += classificationResult.inferenceTimeMs
-                                        val topResult = classificationResult.topResults.firstOrNull()
-                                        // Filter results by user's minimum confidence threshold
-                                        if (topResult != null && topResult.second >= currentMinConf) {
-                                            results.add(
-                                                DetectionResult(
-                                                    boundingBox = RectF(safeRect),
-                                                    label = topResult.first,
-                                                    confidence = topResult.second,
-                                                    mlKitLabel = mlKitLabel
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        _detectionResults.value = results
-                        _inferenceTime.value = totalInferenceTime
+                        processFrameInference(inputImage, bitmap)
                     }
                 } catch (e: Exception) {
                     _errorMessage.value = "Processing error: ${e.message}"
@@ -252,6 +173,74 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
             imageProxy.close()
             isProcessing = false
         }
+    }
+
+    private fun processFrameInference(inputImage: InputImage, bitmap: Bitmap?) {
+        val rawObjects = objectDetectorHelper?.detect(inputImage) ?: emptyList()
+        val minArea = 40 * 40
+
+        val detectedObjects = rawObjects
+            .filter { obj -> obj.boundingBox.width() * obj.boundingBox.height() >= minArea }
+            .take(_maxDetections.value)
+
+        val results = mutableListOf<DetectionResult>()
+        var totalInferenceTime = 0L
+
+        for (obj in detectedObjects) {
+            val result = cropAndClassify(obj, bitmap)
+            if (result != null) {
+                totalInferenceTime += result.second
+                results.add(result.first)
+            }
+        }
+
+        _detectionResults.value = results
+        _inferenceTime.value = totalInferenceTime
+    }
+
+    private fun cropAndClassify(
+        detectedObject: DetectedObject,
+        bitmap: Bitmap?
+    ): Pair<DetectionResult, Long>? {
+        if (bitmap == null) return null
+
+        val rawBox = detectedObject.boundingBox
+        val mlKitLabel = detectedObject.labels.firstOrNull()?.text ?: "Unknown"
+
+        val currentMargin = _paddingMarginPercent.value
+        val padX = (rawBox.width() * currentMargin).toInt()
+        val padY = (rawBox.height() * currentMargin).toInt()
+
+        val safeRect = Rect(
+            Math.max(0, rawBox.left - padX),
+            Math.max(0, rawBox.top - padY),
+            Math.min(bitmap.width, rawBox.right + padX),
+            Math.min(bitmap.height, rawBox.bottom + padY)
+        )
+
+        if (safeRect.width() <= 0 || safeRect.height() <= 0) return null
+
+        val croppedBitmap = Bitmap.createBitmap(
+            bitmap, safeRect.left, safeRect.top, safeRect.width(), safeRect.height()
+        )
+
+        val classificationResult = imageClassifierHelper?.classify(croppedBitmap)
+        croppedBitmap.recycle()
+
+        if (classificationResult != null) {
+            val topResult = classificationResult.topResults.firstOrNull()
+            if (topResult != null && topResult.second >= _minConfidenceThreshold.value) {
+                val detectionResult = DetectionResult(
+                    boundingBox = RectF(safeRect),
+                    label = topResult.first,
+                    confidence = topResult.second,
+                    mlKitLabel = mlKitLabel
+                )
+                return Pair(detectionResult, classificationResult.inferenceTimeMs)
+            }
+        }
+
+        return null
     }
 
     override fun onCleared() {

@@ -23,36 +23,31 @@ class ImageClassifierHelper(private val context: Context) {
 
     private var interpreter: InterpreterApi? = null
     private val labels = mutableListOf<String>()
-
     private val imageSize = 640
     private var isBchw = false
 
     init {
         loadLabels()
-        setupInterpreter(false)
+        setupInterpreter(useGpu = false)
     }
 
     private fun loadLabels() {
-        try {
-            val inputStream = context.assets.open("coco_labels.txt")
-            inputStream.bufferedReader().useLines { lines ->
+        runCatching {
+            context.assets.open("coco_labels.txt").bufferedReader().useLines { lines ->
                 labels.addAll(lines)
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
 
     private fun loadModelFile(): MappedByteBuffer {
-        // Load YOLOv8-nano model exported via LiteRT-Torch
         val fileDescriptor = context.assets.openFd("yolov8n.tflite")
-        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        return fileChannel.map(
-            FileChannel.MapMode.READ_ONLY,
-            fileDescriptor.startOffset,
-            fileDescriptor.declaredLength
-        )
+        FileInputStream(fileDescriptor.fileDescriptor).use { inputStream ->
+            return inputStream.channel.map(
+                FileChannel.MapMode.READ_ONLY,
+                fileDescriptor.startOffset,
+                fileDescriptor.declaredLength
+            )
+        }
     }
 
     private fun setupInterpreter(useGpu: Boolean) {
@@ -67,23 +62,17 @@ class ImageClassifierHelper(private val context: Context) {
             options.setNumThreads(4)
         }
 
-        val model = loadModelFile()
-        val newInterpreter = InterpreterApi.create(model, options)
+        val newInterpreter = InterpreterApi.create(loadModelFile(), options)
 
-        try {
+        runCatching {
             val inputShape = newInterpreter.getInputTensor(0).shape()
-            // Check if input is BCHW [1, 3, 640, 640] or BHWC [1, 640, 640, 3]
             isBchw = inputShape.size >= 4 && inputShape[1] == 3
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
 
         interpreter = newInterpreter
     }
 
-    fun toggleGpu(useGpu: Boolean) {
-        setupInterpreter(useGpu)
-    }
+    fun toggleGpu(useGpu: Boolean) = setupInterpreter(useGpu)
 
     fun classify(bitmap: Bitmap): ClassificationResult {
         val letterboxedBitmap = letterboxBitmap(bitmap, imageSize)
@@ -97,10 +86,10 @@ class ImageClassifierHelper(private val context: Context) {
         interpreter?.run(inputBuffer, outputArray)
         val endTime = System.nanoTime()
 
-        // Parse YOLOv8 outputs: 80 COCO classes probabilities (indices 4..83 across 8400 anchors)
+        // Parse YOLOv8 outputs across 8,400 anchors for 80 COCO classes
         val classScores = FloatArray(labels.size)
-
         val output = outputArray[0]
+
         for (col in 0 until 8400) {
             for (cls in 0 until Math.min(80, labels.size)) {
                 val score = output[4 + cls][col]
@@ -118,7 +107,7 @@ class ImageClassifierHelper(private val context: Context) {
 
         return ClassificationResult(
             topResults = topResults,
-            inferenceTimeMs = (endTime - startTime) / 1000000
+            inferenceTimeMs = (endTime - startTime) / 1_000_000
         )
     }
 
@@ -127,57 +116,44 @@ class ImageClassifierHelper(private val context: Context) {
         val canvas = Canvas(result)
         canvas.drawColor(Color.rgb(128, 128, 128))
 
-        val srcWidth = source.width.toFloat()
-        val srcHeight = source.height.toFloat()
-
-        val scale = Math.min(targetSize / srcWidth, targetSize / srcHeight)
-        val scaledWidth = srcWidth * scale
-        val scaledHeight = srcHeight * scale
+        val scale = Math.min(targetSize / source.width.toFloat(), targetSize / source.height.toFloat())
+        val scaledWidth = source.width * scale
+        val scaledHeight = source.height * scale
 
         val left = (targetSize - scaledWidth) / 2f
         val top = (targetSize - scaledHeight) / 2f
 
         val destRect = RectF(left, top, left + scaledWidth, top + scaledHeight)
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-        canvas.drawBitmap(source, null, destRect, paint)
+        canvas.drawBitmap(source, null, destRect, Paint(Paint.FILTER_BITMAP_FLAG))
 
         return result
     }
 
     private fun convertBitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
-        val byteBuffer = ByteBuffer.allocateDirect(4 * 1 * imageSize * imageSize * 3) // 4 bytes per float
+        val byteBuffer = ByteBuffer.allocateDirect(4 * imageSize * imageSize * 3)
         byteBuffer.order(ByteOrder.nativeOrder())
 
         val intValues = IntArray(imageSize * imageSize)
         bitmap.getPixels(intValues, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
 
         if (isBchw) {
-            // [1, 3, 640, 640] format
-            val rBuffer = FloatArray(imageSize * imageSize)
-            val gBuffer = FloatArray(imageSize * imageSize)
-            val bBuffer = FloatArray(imageSize * imageSize)
-
-            var pixel = 0
-            for (i in 0 until imageSize * imageSize) {
-                val value = intValues[pixel++]
-                rBuffer[i] = ((value shr 16) and 0xFF) / 255.0f
-                gBuffer[i] = ((value shr 8) and 0xFF) / 255.0f
-                bBuffer[i] = (value and 0xFF) / 255.0f
+            val r = FloatArray(imageSize * imageSize)
+            val g = FloatArray(imageSize * imageSize)
+            val b = FloatArray(imageSize * imageSize)
+            for (i in intValues.indices) {
+                val v = intValues[i]
+                r[i] = ((v shr 16) and 0xFF) / 255.0f
+                g[i] = ((v shr 8) and 0xFF) / 255.0f
+                b[i] = (v and 0xFF) / 255.0f
             }
-
-            for (f in rBuffer) byteBuffer.putFloat(f)
-            for (f in gBuffer) byteBuffer.putFloat(f)
-            for (f in bBuffer) byteBuffer.putFloat(f)
+            for (f in r) byteBuffer.putFloat(f)
+            for (f in g) byteBuffer.putFloat(f)
+            for (f in b) byteBuffer.putFloat(f)
         } else {
-            // [1, 640, 640, 3] format
-            var pixel = 0
-            for (i in 0 until imageSize) {
-                for (j in 0 until imageSize) {
-                    val value = intValues[pixel++]
-                    byteBuffer.putFloat(((value shr 16) and 0xFF) / 255.0f)
-                    byteBuffer.putFloat(((value shr 8) and 0xFF) / 255.0f)
-                    byteBuffer.putFloat((value and 0xFF) / 255.0f)
-                }
+            for (v in intValues) {
+                byteBuffer.putFloat(((v shr 16) and 0xFF) / 255.0f)
+                byteBuffer.putFloat(((v shr 8) and 0xFF) / 255.0f)
+                byteBuffer.putFloat((v and 0xFF) / 255.0f)
             }
         }
 

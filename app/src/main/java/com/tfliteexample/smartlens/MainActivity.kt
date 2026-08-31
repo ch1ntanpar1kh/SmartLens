@@ -63,7 +63,6 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
     val imageWidth by viewModel.imageWidth.collectAsState()
     val imageHeight by viewModel.imageHeight.collectAsState()
 
-    // Fine-tuning settings state
     val minConfidenceThreshold by viewModel.minConfidenceThreshold.collectAsState()
     val paddingMarginPercent by viewModel.paddingMarginPercent.collectAsState()
     val isSingleImageMode by viewModel.isSingleImageMode.collectAsState()
@@ -93,17 +92,7 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
     }
 
     if (!hasCameraPermission) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("📷", fontSize = 48.sp)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Camera permission is required")
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                    Text("Grant Permission")
-                }
-            }
-        }
+        PermissionRequestContent(onGrant = { permissionLauncher.launch(Manifest.permission.CAMERA) })
         return
     }
 
@@ -143,7 +132,6 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Camera preview with FILL_CENTER scale type
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = {
@@ -153,7 +141,6 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
             }
         )
 
-        // Bounding Box Overlay
         if (imageWidth > 0 && imageHeight > 0) {
             DetectionOverlay(
                 results = detectionResults,
@@ -163,7 +150,6 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
             )
         }
 
-        // Top Action Bar: Settings Toggle Button
         IconButton(
             onClick = { showSettingsPanel = !showSettingsPanel },
             modifier = Modifier
@@ -178,7 +164,6 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
             )
         }
 
-        // Bottom Info Bar + Expandable Fine-Tuning Panel
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -186,93 +171,21 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
                 .background(Color.Black.copy(alpha = 0.8f))
                 .padding(16.dp)
         ) {
-            // Expandable Accuracy Tuning Settings Panel
             AnimatedVisibility(
                 visible = showSettingsPanel,
                 enter = expandVertically(),
                 exit = shrinkVertically()
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp)
-                        .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                        .padding(12.dp)
-                ) {
-                    Text(
-                        "⚙️ Accuracy & Detection Tuning",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Min Confidence Threshold Slider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Min Confidence Threshold:", color = Color.White, fontSize = 12.sp)
-                        Text("${(minConfidenceThreshold * 100).toInt()}%", color = Color.Green, fontSize = 12.sp)
-                    }
-                    Slider(
-                        value = minConfidenceThreshold,
-                        onValueChange = { viewModel.setMinConfidenceThreshold(it) },
-                        valueRange = 0.10f..0.90f
-                    )
-
-                    // Bounding Box Padding Margin Slider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Box Padding Margin:", color = Color.White, fontSize = 12.sp)
-                        Text("${(paddingMarginPercent * 100).toInt()}%", color = Color.Yellow, fontSize = 12.sp)
-                    }
-                    Slider(
-                        value = paddingMarginPercent,
-                        onValueChange = { viewModel.setPaddingMarginPercent(it) },
-                        valueRange = 0.00f..0.30f
-                    )
-
-                    // Single Image High-Res Detector Mode Switch
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("High-Res Single Image Mode", color = Color.White, fontSize = 12.sp)
-                            Text(
-                                if (isSingleImageMode) "Higher resolution detector per frame" else "Fast stream tracking mode",
-                                color = Color.Gray,
-                                fontSize = 10.sp
-                            )
-                        }
-                        Switch(
-                            checked = isSingleImageMode,
-                            onCheckedChange = { viewModel.setSingleImageMode(it) }
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Max Objects Count Slider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Max Objects Detected:", color = Color.White, fontSize = 12.sp)
-                        Text("$maxDetections", color = Color.Cyan, fontSize = 12.sp)
-                    }
-                    Slider(
-                        value = maxDetections.toFloat(),
-                        onValueChange = { viewModel.setMaxDetections(it.toInt()) },
-                        valueRange = 1f..5f,
-                        steps = 3
-                    )
-                }
+                TuningSettingsPanel(
+                    minConfidenceThreshold = minConfidenceThreshold,
+                    paddingMarginPercent = paddingMarginPercent,
+                    isSingleImageMode = isSingleImageMode,
+                    maxDetections = maxDetections,
+                    onMinConfidenceChange = { viewModel.setMinConfidenceThreshold(it) },
+                    onPaddingMarginChange = { viewModel.setPaddingMarginPercent(it) },
+                    onSingleImageModeChange = { viewModel.setSingleImageMode(it) },
+                    onMaxDetectionsChange = { viewModel.setMaxDetections(it) }
+                )
             }
 
             if (!isInitialized) {
@@ -303,7 +216,6 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
                 )
             }
 
-            // Main Status Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -326,7 +238,6 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
                 )
             }
 
-            // Object count status
             if (detectionResults.isNotEmpty()) {
                 Text(
                     text = "${detectionResults.size} object(s) detected",
@@ -336,5 +247,101 @@ fun SmartLensScreen(viewModel: SmartLensViewModel = viewModel()) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PermissionRequestContent(onGrant: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("📷", fontSize = 48.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Camera permission is required")
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onGrant) {
+                Text("Grant Permission")
+            }
+        }
+    }
+}
+
+@Composable
+private fun TuningSettingsPanel(
+    minConfidenceThreshold: Float,
+    paddingMarginPercent: Float,
+    isSingleImageMode: Boolean,
+    maxDetections: Int,
+    onMinConfidenceChange: (Float) -> Unit,
+    onPaddingMarginChange: (Float) -> Unit,
+    onSingleImageModeChange: (Boolean) -> Unit,
+    onMaxDetectionsChange: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Text(
+            "⚙️ Accuracy & Detection Tuning",
+            color = Color.White,
+            fontSize = 14.sp,
+            style = MaterialTheme.typography.titleMedium
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Min Confidence Threshold:", color = Color.White, fontSize = 12.sp)
+            Text("${(minConfidenceThreshold * 100).toInt()}%", color = Color.Green, fontSize = 12.sp)
+        }
+        Slider(
+            value = minConfidenceThreshold,
+            onValueChange = onMinConfidenceChange,
+            valueRange = 0.10f..0.90f
+        )
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Box Padding Margin:", color = Color.White, fontSize = 12.sp)
+            Text("${(paddingMarginPercent * 100).toInt()}%", color = Color.Yellow, fontSize = 12.sp)
+        }
+        Slider(
+            value = paddingMarginPercent,
+            onValueChange = onPaddingMarginChange,
+            valueRange = 0.00f..0.30f
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("High-Res Single Image Mode", color = Color.White, fontSize = 12.sp)
+                Text(
+                    if (isSingleImageMode) "Higher resolution detector per frame" else "Fast stream tracking mode",
+                    color = Color.Gray,
+                    fontSize = 10.sp
+                )
+            }
+            Switch(
+                checked = isSingleImageMode,
+                onCheckedChange = onSingleImageModeChange
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Max Objects Detected:", color = Color.White, fontSize = 12.sp)
+            Text("$maxDetections", color = Color.Cyan, fontSize = 12.sp)
+        }
+        Slider(
+            value = maxDetections.toFloat(),
+            onValueChange = { onMaxDetectionsChange(it.toInt()) },
+            valueRange = 1f..5f,
+            steps = 3
+        )
     }
 }

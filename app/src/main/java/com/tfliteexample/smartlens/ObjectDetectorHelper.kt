@@ -12,14 +12,14 @@ class ObjectDetectorHelper {
     private var currentMode = ObjectDetectorOptions.STREAM_MODE
     private var objectDetector: ObjectDetector = createDetector(currentMode)
 
-    private fun createDetector(mode: Int): ObjectDetector {
-        val options = ObjectDetectorOptions.Builder()
-            .setDetectorMode(mode)
-            .enableMultipleObjects()
-            .enableClassification()
-            .build()
-        return ObjectDetection.getClient(options)
-    }
+    private fun createDetector(mode: Int): ObjectDetector =
+        ObjectDetection.getClient(
+            ObjectDetectorOptions.Builder()
+                .setDetectorMode(mode)
+                .enableMultipleObjects()
+                .enableClassification()
+                .build()
+        )
 
     fun setMode(singleImageMode: Boolean) {
         val newMode = if (singleImageMode) {
@@ -35,15 +35,9 @@ class ObjectDetectorHelper {
         }
     }
 
-    suspend fun detect(image: InputImage): List<DetectedObject> {
-        return try {
-            objectDetector.process(image).await()
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
+    suspend fun detect(image: InputImage): List<DetectedObject> = runCatching {
+        objectDetector.process(image).await()
+    }.getOrDefault(emptyList())
 
-    fun close() {
-        objectDetector.close()
-    }
+    fun close() = objectDetector.close()
 }
