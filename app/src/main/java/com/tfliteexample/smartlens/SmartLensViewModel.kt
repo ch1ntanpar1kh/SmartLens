@@ -132,21 +132,34 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
             viewModelScope.launch(mlDispatcher) {
                 try {
                     mlMutex.withLock {
-                        val detectedObjects = objectDetectorHelper?.detect(inputImage) ?: emptyList()
+                        val rawObjects = objectDetectorHelper?.detect(inputImage) ?: emptyList()
+
+                        // Fix #5: Filter out spurious or tiny detections (< 40x40 px)
+                        val minArea = 40 * 40
+                        val detectedObjects = rawObjects.filter { obj ->
+                            val rect = obj.boundingBox
+                            rect.width() * rect.height() >= minArea
+                        }
+
                         val results = mutableListOf<DetectionResult>()
                         var totalInferenceTime = 0L
 
                         for (detectedObject in detectedObjects) {
-                            val boundingBox = detectedObject.boundingBox
+                            val rawBox = detectedObject.boundingBox
                             val mlKitLabel = detectedObject.labels.firstOrNull()?.text ?: "Unknown"
 
                             if (bitmap != null) {
+                                // Fix #2: Add 12% padding around the bounding box to capture full object context
+                                val padX = (rawBox.width() * 0.12f).toInt()
+                                val padY = (rawBox.height() * 0.12f).toInt()
+
                                 val safeRect = Rect(
-                                    Math.max(0, boundingBox.left),
-                                    Math.max(0, boundingBox.top),
-                                    Math.min(bitmap.width, boundingBox.right),
-                                    Math.min(bitmap.height, boundingBox.bottom)
+                                    Math.max(0, rawBox.left - padX),
+                                    Math.max(0, rawBox.top - padY),
+                                    Math.min(bitmap.width, rawBox.right + padX),
+                                    Math.min(bitmap.height, rawBox.bottom + padY)
                                 )
+
                                 if (safeRect.width() > 0 && safeRect.height() > 0) {
                                     val croppedBitmap = Bitmap.createBitmap(
                                         bitmap,
@@ -165,7 +178,7 @@ class SmartLensViewModel(application: Application) : AndroidViewModel(applicatio
                                         if (topResult != null) {
                                             results.add(
                                                 DetectionResult(
-                                                    boundingBox = RectF(boundingBox),
+                                                    boundingBox = RectF(safeRect),
                                                     label = topResult.first,
                                                     confidence = topResult.second,
                                                     mlKitLabel = mlKitLabel

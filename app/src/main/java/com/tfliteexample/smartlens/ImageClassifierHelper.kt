@@ -2,6 +2,10 @@ package com.tfliteexample.smartlens
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import org.tensorflow.lite.InterpreterApi
 import org.tensorflow.lite.gpu.GpuDelegateFactory
 import java.io.FileInputStream
@@ -71,8 +75,11 @@ class ImageClassifierHelper(private val context: Context) {
     }
 
     fun classify(bitmap: Bitmap): ClassificationResult {
-        val resizedBitmap = Bitmap.createScaledBitmap(bitmap, imageSize, imageSize, true)
-        val inputBuffer = convertBitmapToByteBuffer(resizedBitmap)
+        // Fix #1: Preserves aspect ratio using letterboxing with a neutral gray background
+        // instead of squishing non-square objects into 224x224
+        val letterboxedBitmap = letterboxBitmap(bitmap, imageSize)
+        val inputBuffer = convertBitmapToByteBuffer(letterboxedBitmap)
+        letterboxedBitmap.recycle()
 
         // Output format for uint8 quantized model
         val outputArray = Array(1) { ByteArray(numClasses) }
@@ -94,6 +101,34 @@ class ImageClassifierHelper(private val context: Context) {
             topResults = topResults,
             inferenceTimeMs = (endTime - startTime) / 1000000
         )
+    }
+
+    /**
+     * Resizes [source] bitmap into a [targetSize] x [targetSize] canvas while preserving original aspect ratio.
+     * Empty space is letterboxed with a neutral gray (RGB 128,128,128) color.
+     */
+    private fun letterboxBitmap(source: Bitmap, targetSize: Int): Bitmap {
+        val result = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(result)
+
+        // Fill background with neutral gray (128, 128, 128)
+        canvas.drawColor(Color.rgb(128, 128, 128))
+
+        val srcWidth = source.width.toFloat()
+        val srcHeight = source.height.toFloat()
+
+        val scale = Math.min(targetSize / srcWidth, targetSize / srcHeight)
+        val scaledWidth = srcWidth * scale
+        val scaledHeight = srcHeight * scale
+
+        val left = (targetSize - scaledWidth) / 2f
+        val top = (targetSize - scaledHeight) / 2f
+
+        val destRect = RectF(left, top, left + scaledWidth, top + scaledHeight)
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(source, null, destRect, paint)
+
+        return result
     }
 
     private fun convertBitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
