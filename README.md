@@ -2,6 +2,8 @@
 
 Real-time Android object detection and classification app powered by **YOLOv8-nano**, **ML Kit**, **LiteRT (TensorFlow Lite)** via **Google Play Services (GMS)**, **CameraX**, and **Jetpack Compose**.
 
+> 📚 **Beginner Step-by-Step Guide**: Read the comprehensive [**TUTORIAL.md**](TUTORIAL.md) for full architecture details, GMS Core deployment benefits, pre-processing math, YOLOv8 output matrix parsing, and GPU thread-safety patterns.
+
 ## Features
 
 - 🎯 **YOLOv8-nano LiteRT Classification**: Converted via **LiteRT-Torch 0.9.1** to classify 80 everyday COCO objects (*cell phone, laptop, coffee mug, chair, bottle, backpack, etc.*) instead of legacy academic ImageNet classes.
